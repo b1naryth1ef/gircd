@@ -6,6 +6,7 @@ import "log"
 type Msg struct {
 	Tag    string
 	Values []string
+	Client *Client
 }
 
 func NewMsg(tag string, vals ...string) *Msg {
@@ -48,7 +49,13 @@ func (m *Msg) Debug(i *Client) {
 	i.LogF("Values: %s\n", m.Values)
 }
 
+func (m *Msg) Error(txt string) {
+	m.Client.LogF("ParseError: %s (%s, %s, %s)\n", txt, m.Tag, len(m.Values), m.Values)
+}
+
 func (m *Msg) Parse(i *Client) {
+	m.Client = i
+
 	er := func(txt string) {
 		i.LogF("ParseError: %s (%s, %s, %s)\n", txt, m.Tag, len(m.Values), m.Values)
 	}
@@ -75,4 +82,38 @@ func (m *Msg) Parse(i *Client) {
 	} else {
 		i.LogF("Failed to parse!\n")
 	}
+}
+
+type FParser func(*Msg, *Client)
+
+type Parser struct {
+	Parsers map[string]FParser
+	Current *Msg
+}
+
+func (p *Parser) Bind(s string, f FParser) {
+	p.Parsers[s] = f
+}
+
+func (p *Parser) Init() {
+	p.Bind("NICK", func(m *Msg, c *Client) {
+		if len(m.Values) != 1 {
+			m.Error("Need exactly 1 value for NICK message")
+		}
+
+		// TODO: Sanatize
+		c.Nick = m.Values[0]
+	})
+
+	p.Bind("USER", func(m *Msg, c *Client) {
+		if len(m.Values) != 4 {
+			m.Error("Need exactly 4 values for USER message")
+			return
+		}
+
+		c.User = m.Values[0]
+		c.Mode = m.Values[1]
+		c.Unused = m.Values[2]
+		c.RealName = m.Values[3]
+	})
 }
