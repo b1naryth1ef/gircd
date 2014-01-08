@@ -39,6 +39,10 @@ func NewServer(port string, password string) *Server {
 	}
 }
 
+func (s *Server) GetHash() string {
+	return "localhost:" + string(s.Port)
+}
+
 // Returns the next availible ID, skips over used ID's
 func (s *Server) NextID() int {
 	for s.HasClient(s.id_inc) {
@@ -179,6 +183,9 @@ func (s *Server) Start() {
 	}
 	s.running = true
 	s.Conn = ln
+
+	log.Printf("Loading Parser")
+	InitParser()
 
 	log.SetOutput(os.Stdout)
 	log.Printf("Running!")
