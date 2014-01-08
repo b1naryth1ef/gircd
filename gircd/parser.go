@@ -72,7 +72,13 @@ func (m *Msg) Debug(i *Client) {
 	i.LogF("Values: %s\n", m.Values)
 }
 
+func (m *Msg) Error(txt string) {
+	m.Client.LogF("ParseError: %s (%s, %s, %s)\n", txt, m.Tag, len(m.Values), m.Values)
+}
+
 func (m *Msg) Parse(i *Client) {
+	m.Client = i
+
 	er := func(txt string) {
 		i.LogF("ParseError: %s (%s, %s, %s)\n", txt, m.Tag, len(m.Values), m.Values)
 	}
