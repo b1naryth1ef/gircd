@@ -5,8 +5,7 @@ import "fmt"
 import "log"
 import "sync"
 import "time"
-
-//import "strings"
+import "strings"
 
 // ENUM: ClientState
 const (
@@ -26,6 +25,8 @@ type ClientInfo struct {
 	Mode     string
 	Unused   string
 	RealName string
+
+	GlobalOp bool
 }
 
 type Client struct {
@@ -41,6 +42,8 @@ type Client struct {
 	Updates []*Update
 	MsgQ    chan *Msg
 
+	Channels int
+
 	ClientInfo
 }
 
@@ -50,14 +53,16 @@ var UPDATE_TIME = time.Millisecond * 350
 //  connection
 func NewClient(id int, server *Server, c net.Conn) *Client {
 	cli := &Client{
-		Conn:       c,
-		Server:     server,
-		ID:         id,
-		MsgQ:       make(chan *Msg, 1),
-		Updates:    make([]*Update, 0),
-		Lock:       new(sync.RWMutex),
-		LastPing:   time.Now(),
-		ClientInfo: ClientInfo{},
+		Conn:     c,
+		Server:   server,
+		ID:       id,
+		MsgQ:     make(chan *Msg, 1),
+		Updates:  make([]*Update, 0),
+		Lock:     new(sync.RWMutex),
+		LastPing: time.Now(),
+		ClientInfo: ClientInfo{
+			GlobalOp: true,
+		},
 	}
 
 	// Set our timeout pretty high
@@ -73,11 +78,13 @@ func NewClient(id int, server *Server, c net.Conn) *Client {
 	// Write empty line for lulz
 	cli.Write("")
 
-	// Queue a timeout update
-	NewUpdate(UPDATE_LOGIN_TIMEOUT, cli).Set("start", time.Now()).Queue()
-
 	// Return ourselves for chaining
 	return cli
+}
+
+// Gets the user hash
+func (c *Client) GetHash() string {
+	return fmt.Sprintf("%s!%s@%s", c.Nick, c.User, c.GetAddr())
 }
 
 // Grabs a write lock and changes the state
@@ -85,6 +92,11 @@ func (c *Client) SetState(s int) {
 	c.Lock.Lock()
 	c.State = s
 	c.Lock.Unlock()
+}
+
+// Get addr
+func (c *Client) GetAddr() string {
+	return strings.Split(c.Conn.RemoteAddr().String(), ":")[0]
 }
 
 // Grabs a read lock and checks whether we have timed out
@@ -97,6 +109,13 @@ func (c *Client) CheckPing() bool {
 	return true
 }
 
+// Creates a new response towards the client
+func (c *Client) Resp(tag string) *Response {
+	r := NewResponse(tag, c, c.Server)
+	r.Server = c.Server
+	return r
+}
+
 // Resets our ping
 func (c *Client) MarkPing() {
 	c.Lock.Lock()
@@ -106,12 +125,24 @@ func (c *Client) MarkPing() {
 
 // Called after the AUTH process is done
 func (c *Client) Init() {
+	c.Resp(RPL_WELCOME).SetF("Welcome to %s %s! %s@%s", c.Server.Name, c.Nick, c.User, c.GetAddr()).Send()
+	c.Resp(RPL_MYINFO).Set(c.Server.Name).Send()
+	c.SendMOTD()
+}
 
+// Send MOTD
+func (c *Client) SendMOTD() {
+	c.Resp(RPL_MOTDSTART).Set(":- MESSAGE OF THE DAY -")
+	for _, v := range c.Server.MOTD {
+		c.Resp(RPL_MOTD).SetF(":%s", v).Send()
+	}
+	c.Resp(RPL_ENDOFMOTD).Set(":End of /MOTD command.")
 }
 
 // Writes a string + LINE_TERM
 func (c *Client) Write(l string) {
 	l = l + LINE_TERM
+	c.Conn.Write([]byte(l))
 }
 
 // Formats and writes a string
@@ -121,6 +152,15 @@ func (c *Client) WriteF(l string, vars ...interface{}) {
 
 // Forces a user to disconnect from the server (e.g. kick)
 func (c *Client) ForceDC(s string) {
+	// Part all channels
+	for _, v := range c.Server.Channels {
+		c.LogF("checking chan %s", v.GetName())
+		if v.IsMember(c) {
+			c.Log("yes!")
+			v.ClientPart(c, s)
+		}
+	}
+
 	c.SetState(STATE_DEAD)
 	c.WriteF("QUIT :%s", s)
 	c.Conn.Close()

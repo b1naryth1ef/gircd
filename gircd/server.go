@@ -14,33 +14,89 @@ const (
 	PING_TIMEOUT  = time.Second * 120
 	RECV_BUF_SIZE = 2048
 	BREATH_TIME   = time.Millisecond * 5
+	MAX_CHANNELS  = 64
+	MAX_LINE_SIZE = 510
 )
 
+type ServerInfo struct {
+	Name    string
+	Version int
+	MOTD    []string
+}
+
 type Server struct {
-	Conn    net.Listener
-	Clients map[int]*Client
+	Conn     net.Listener
+	Clients  map[int]*Client
+	Channels map[string]*Channel
 
 	// Config
+	Host     string
 	Port     string
 	Password string
 
 	// Is the server running?
 	running bool
 	id_inc  int
+
+	ServerInfo
 }
 
-func NewServer(port string, password string) *Server {
+func NewServer(host string, port string, password string) *Server {
 	return &Server{
 		Clients:  make(map[int]*Client, 0),
+		Channels: make(map[string]*Channel, 0),
 		running:  false,
 		id_inc:   0,
+		Host:     host,
 		Port:     port,
 		Password: password,
+		ServerInfo: ServerInfo{
+			Name:    "GIRCD",
+			Version: 1,
+			MOTD: []string{
+				"Welcome to GIRCD Test server!",
+				"Please enjoy your stay and be nice!",
+			},
+		},
 	}
 }
 
+func (s *Server) FindUserByNick(nick string) *Client {
+	for _, v := range s.Clients {
+		if v.Nick == nick {
+			return v
+		}
+	}
+	return nil
+}
+
+func (s *Server) NewChannel(prefix string, name string) *Channel {
+	channel := NewChannel(prefix, name, s)
+	go channel.SendLoop()
+	s.Channels[channel.GetName()] = channel
+	return channel
+}
+
+func (s *Server) GetChannel(name string) *Channel {
+	return s.Channels[name]
+}
+
+func (s *Server) RmvChannel(c *Channel) {
+	// Force loop to stop
+	c.Alive = false
+	c.Send("")
+	delete(s.Channels, c.GetName())
+}
+
+func (s *Server) HasChannel(name string) bool {
+	if _, c := s.Channels[name]; c {
+		return true
+	}
+	return false
+}
+
 func (s *Server) GetHash() string {
-	return "localhost:" + string(s.Port)
+	return s.Host
 }
 
 // Returns the next availible ID, skips over used ID's
@@ -100,7 +156,8 @@ func (s *Server) AcceptLoop() {
 		log.Printf("Accepting new connection: %d\n", id)
 		cli := NewClient(id, s, conn)
 		s.AddClient(cli)
-		cli.Init()
+
+		NewUpdate(UPDATE_LOGIN_TIMEOUT, cli).Set("start", time.Now()).Queue()
 	}
 }
 
@@ -143,6 +200,7 @@ func (s *Server) ReadLoop() {
 				if e == io.EOF {
 					v.LogF("Client Closed Connection...\n")
 					v.ForceDC("Client Closed Connection")
+					continue
 				}
 				v.LogF("Error reading: %s\n", e)
 				continue
@@ -154,7 +212,11 @@ func (s *Server) ReadLoop() {
 					if len(line) == 0 {
 						continue
 					}
-					v.MsgQ <- NewMsgFrom(line)
+					msg := NewMsgFrom(line)
+					if msg == nil {
+						continue
+					}
+					v.MsgQ <- msg
 					v.LogF("Added msg to buffer!\n")
 				}
 			}

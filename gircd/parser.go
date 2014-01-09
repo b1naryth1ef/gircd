@@ -44,7 +44,8 @@ func SplitMsg(s string) []string {
 	if strings.Contains(s, ":") {
 		a := strings.SplitN(s, ":", 2)
 		if len(a) != 2 {
-			log.Panicf("SplitMsg failure: %s\n", s)
+			log.Printf("[WARN] SplitMsg failure: %s\n", s)
+			return nil
 		}
 		for _, substr := range strings.Split(a[0], " ") {
 			if substr == "" {
@@ -61,7 +62,8 @@ func SplitMsg(s string) []string {
 func NewMsgFrom(data string) *Msg {
 	sd := strings.SplitN(data, " ", 2)
 	if len(sd) != 2 {
-		log.Panicf("NewMsgFrom failure: %s\n", data)
+		log.Printf("[WARN] NewMsgFrom failure: %s\n", data)
+		return nil
 	}
 	sf := SplitMsg(sd[1])
 	return NewMsg(sd[0], sf...)
@@ -114,6 +116,13 @@ func InitParser() {
 			// TODO: limit size of nickname
 			i.ErrorS(BuildError(ERR_ERRONEUSNICKNAME, m.Values[0]))
 		}
+
+		// Check if the nick is already in use
+		if m.Client.Server.FindUserByNick(n) != nil {
+			m.Error("Nick in use")
+			i.Resp(ERR_NICKNAMEINUSE).Set(n).Set(":That nickname is already in use!")
+		}
+
 		i.Nick = n
 		i.SetState(STATE_WAIT_USER)
 	})
@@ -140,5 +149,59 @@ func InitParser() {
 		// The user is authed up and ready to go
 		i.SetState(STATE_ACTIVE)
 		i.Init()
+	})
+
+	PF("JOIN", func(i *Client, m *Msg) {
+		// User must be authed and active
+		if i.State != STATE_ACTIVE {
+			m.Error("Active state required for JOIN")
+			return
+		}
+
+		// Require 1 to 2 values for JOIN
+		if len(m.Values) != 2 && len(m.Values) != 1 {
+			m.Error("JOIN requires 1-2 values")
+			return
+		}
+
+		// A user can join up to MAX_CHANNELS, and otherwise is denied
+		if i.Channels > MAX_CHANNELS {
+			i.Resp(ERR_TOOMANYCHANNELS).Set(m.Values[0]).SetF(":You may join a maximum of %d channels!", MAX_CHANNELS)
+			return
+		}
+
+		// Null password by default
+		var password string = ""
+
+		// Set password if provided
+		if len(m.Values) == 2 {
+			password = m.Values[1]
+		}
+
+		// Get a channel (either by creating it, or grabbing it)
+		var c *Channel
+		if i.Server.HasChannel(m.Values[0]) {
+			c = i.Server.GetChannel(m.Values[0])
+		} else {
+			c = i.Server.NewChannel(string(m.Values[0][0]), m.Values[0][1:])
+		}
+
+		// This is a weird edge case in the RFC, there is no valid reply to a user trying to join
+		//  a channel they are already on. In this case we just ignore it. Maybe NOTICE?
+		if c.IsMember(i) {
+			m.Error("Client is already a member of the channel")
+			return
+		}
+
+		if !c.CheckPassword(password) {
+			i.Resp(ERR_BADCHANNELKEY).Set(c.GetName()).Set(":Invalid Key For Channel!")
+			return
+		}
+
+		c.ClientJoin(i)
+	})
+
+	PF("QUIT", func(i *Client, m *Msg) {
+		i.ForceDC("Client Quit")
 	})
 }

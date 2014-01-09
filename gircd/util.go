@@ -12,7 +12,7 @@ func Sanatize(s string) (string, bool) {
 	if len(v) > 1 {
 		return "", false
 	}
-	return v[0], false
+	return v[0], true
 }
 
 type IError struct {

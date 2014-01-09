@@ -7,7 +7,7 @@ import "log"
 // Etc
 const (
 	// How long it takes before login times out
-	LOGIN_TIMEOUT_DUR = time.Second * 15
+	LOGIN_TIMEOUT_DUR = time.Second * 30
 )
 
 // ENUM: UpdateType
