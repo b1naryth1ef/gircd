@@ -113,14 +113,15 @@ func InitParser() {
 		n, e := Sanatize(m.Values[0])
 		if !e {
 			m.Error("Nickname is invalid for NICK message")
-			// TODO: limit size of nickname
-			i.ErrorS(BuildError(ERR_ERRONEUSNICKNAME, m.Values[0]))
+			i.Resp(ERR_ERRONEUSNICKNAME).Set(m.Values[0]).Set(":Invalid Nickname!").Send()
+			return
 		}
 
 		// Check if the nick is already in use
 		if m.Client.Server.FindUserByNick(n) != nil {
-			m.Error("Nick in use")
-			i.Resp(ERR_NICKNAMEINUSE).Set(n).Set(":That nickname is already in use!")
+			m.Error("Nickname is already in use")
+			i.Resp(ERR_NICKNAMEINUSE).Set(n).Set(":That nickname is already in use!").Send()
+			return
 		}
 
 		i.Nick = n
@@ -166,7 +167,7 @@ func InitParser() {
 
 		// A user can join up to MAX_CHANNELS, and otherwise is denied
 		if i.Channels > MAX_CHANNELS {
-			i.Resp(ERR_TOOMANYCHANNELS).Set(m.Values[0]).SetF(":You may join a maximum of %d channels!", MAX_CHANNELS)
+			i.Resp(ERR_TOOMANYCHANNELS).Set(m.Values[0]).SetF(":You may join a maximum of %d channels!", MAX_CHANNELS).Send()
 			return
 		}
 
@@ -193,8 +194,9 @@ func InitParser() {
 			return
 		}
 
+		// Check if the PW is correct
 		if !c.CheckPassword(password) {
-			i.Resp(ERR_BADCHANNELKEY).Set(c.GetName()).Set(":Invalid Key For Channel!")
+			i.Resp(ERR_BADCHANNELKEY).Set(c.GetName()).Set(":Invalid Key For Channel!").Send()
 			return
 		}
 
@@ -203,5 +205,80 @@ func InitParser() {
 
 	PF("QUIT", func(i *Client, m *Msg) {
 		i.ForceDC("Client Quit")
+	})
+
+	PF("PONG", func(i *Client, m *Msg) {
+		if len(m.Values) != 1 {
+			m.Error("PONG requires exactly 1 value!")
+			return
+		}
+
+		i.LogF("PONG DATA: %s", m.Values[0])
+	})
+
+	PF("PING", func(i *Client, m *Msg) {
+		if len(m.Values) != 1 {
+			m.Error("PING requires exactly 1 value!")
+			return
+		}
+
+		// TODO: Limit this
+		i.Resp(CLIENT_PONG).SetF(":%s", m.Values[0]).Send()
+	})
+
+	PF("PRIVMSG", func(i *Client, m *Msg) {
+		i.LogF("DATA: %s (SIZE:%d)", m.Values, len(m.Values))
+
+		if len(m.Values) != 2 {
+			m.Error("PRIVMSG requries exactly 2 values!")
+			return
+		}
+
+		if isChannelPrefix(string(m.Values[0][0])) {
+			if i.Server.HasChannel(m.Values[0]) {
+				m.Error("Destination channel does not exist!")
+				return
+			}
+			ch := i.Server.GetChannel(m.Values[0])
+			ch.Message(i, m.Values[1])
+		}
+
+		// TODO: client privmsg
+	})
+
+	PF("PART", func(i *Client, m *Msg) {
+		if len(m.Values) > 1 {
+			m.Error("PART requires 1 or more values!")
+			return
+		}
+
+		// If the channel doesn't exist, the user cant part
+		if !i.Server.HasChannel(m.Values[0]) {
+			m.Error("Cannot PART from channel user is not in!")
+			i.Resp(ERR_NOSUCHCHANNEL).
+				Set(m.Values[0]).
+				Set(":Cannot PART from a channel that does not exist!").
+				Send()
+			return
+		}
+
+		ch := i.Server.GetChannel(m.Values[0])
+		if ch.IsMember(i) {
+			// Try to extract a message
+			var msg string = ""
+			if len(m.Values) > 1 {
+				msg = m.Values[1]
+			}
+
+			// Make the channel part the client
+			ch.ClientPart(i, msg)
+			return
+		} else {
+			// We are not on the channel, send error
+			i.Resp(ERR_NOTONCHANNEL).
+				Set(m.Values[0]).
+				Set(":Cannot PART from a channel you are not in!").
+				Send()
+		}
 	})
 }

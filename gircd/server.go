@@ -137,7 +137,7 @@ func (s *Server) AddClient(c *Client) {
 			log.Printf("Warning: AddClient is ignoring request, client was already added!")
 			return
 		}
-		log.Panicf("AddClient failed, client w/ ID %s already exists and is not identical!", c.ID)
+		log.Printf("[WARN] AddClient failed, client w/ ID %s already exists and is not identical!", c.ID)
 		return
 	}
 	s.Clients[c.ID] = c
@@ -206,6 +206,11 @@ func (s *Server) ReadLoop() {
 				continue
 			}
 			v.LogF("Read bytes: %s\n", c)
+			if c > MAX_LINE_SIZE {
+				v.Log("WARNING: Line size above MAX_LINE_SIZE, skipping...")
+				v.ForceDC("Line size over maximum")
+				continue
+			}
 			if c > 0 {
 				data := string(buff[:c])
 				for _, line := range strings.Split(data, LINE_TERM) {
@@ -251,8 +256,7 @@ func (s *Server) Start() {
 
 	log.SetOutput(os.Stdout)
 	log.Printf("Running!")
-	//go s.UpdateLoop()
-	//go s.PingLoop()
+	go s.PingLoop()
 	go s.ReadLoop()
 	go s.ParseLoop()
 	s.AcceptLoop()

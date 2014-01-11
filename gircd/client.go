@@ -27,6 +27,9 @@ type ClientInfo struct {
 	RealName string
 
 	GlobalOp bool
+
+	// Data to match PING and PONG
+	PingCode string
 }
 
 type Client struct {
@@ -61,6 +64,7 @@ func NewClient(id int, server *Server, c net.Conn) *Client {
 		Lock:     new(sync.RWMutex),
 		LastPing: time.Now(),
 		ClientInfo: ClientInfo{
+			Nick:     "",
 			GlobalOp: true,
 		},
 	}

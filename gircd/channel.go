@@ -23,6 +23,17 @@ const (
 	CHAN_GLOBAL_OP_PREFIX = "&"
 )
 
+func isChannelPrefix(char string) bool {
+	if char == CHAN_OP_PREFIX {
+		return true
+	} else if char == CHAN_VOICE_PREFIX {
+		return true
+	} else if char == CHAN_GLOBAL_OP_PREFIX {
+		return true
+	}
+	return false
+}
+
 type ChannelInfo struct {
 	Mode       string
 	MaxMembers int
@@ -240,4 +251,8 @@ func (c *Channel) SendNames(cl *Client) {
 	}
 
 	cl.Resp(RPL_ENDOFNAMES).Set(c.GetName()).Set(":End of /NAMES list.").Send()
+}
+
+func (c *Channel) Message(cl *Client, msg string) {
+	cl.Resp(CLIENT_PRIVMSG).Set(c.GetName()).SetF(":%s", msg).Chan(c)
 }
