@@ -16,6 +16,9 @@ const (
 	BREATH_TIME   = time.Millisecond * 5
 	MAX_CHANNELS  = 64
 	MAX_LINE_SIZE = 510
+
+	// N packets per 5 seconds must be less than this
+	MESSAGES_PER_5_SEC = 10
 )
 
 type ServerInfo struct {
@@ -182,6 +185,14 @@ func (s *Server) PingLoop() {
 				v.Log("Client timed out on ping!")
 				v.ForceDC("Ping Timeout")
 			}
+
+			if v.Messages > MESSAGES_PER_5_SEC {
+				v.LogF("Client %s seems to be spamming... kicking!")
+				v.ForceDC("Rate Limiting")
+			}
+			v.Lock.Lock()
+			v.Messages = 0
+			v.Lock.Unlock()
 		}
 		time.Sleep(time.Second * 5)
 	}
@@ -221,6 +232,7 @@ func (s *Server) ReadLoop() {
 					if msg == nil {
 						continue
 					}
+					v.Messages += 1
 					v.MsgQ <- msg
 					v.LogF("Added msg to buffer!\n")
 				}
@@ -256,7 +268,7 @@ func (s *Server) Start() {
 
 	log.SetOutput(os.Stdout)
 	log.Printf("Running!")
-	go s.PingLoop()
+	// go s.PingLoop()
 	go s.ReadLoop()
 	go s.ParseLoop()
 	s.AcceptLoop()

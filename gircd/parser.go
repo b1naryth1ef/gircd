@@ -143,7 +143,8 @@ func InitParser() {
 
 		// TODO: Sanatize, find a good way to do it
 		i.User = m.Values[0]
-		i.Mode = m.Values[1]
+		// TODO: User modes
+		// i.Mode.Modes = m.Values[1]
 		i.Unused = m.Values[2]
 		i.RealName = m.Values[3]
 
@@ -217,6 +218,7 @@ func InitParser() {
 	})
 
 	PF("PING", func(i *Client, m *Msg) {
+		i.LogF("%s, %s", m.Values, len(m.Values))
 		if len(m.Values) != 1 {
 			m.Error("PING requires exactly 1 value!")
 			return
@@ -227,27 +229,40 @@ func InitParser() {
 	})
 
 	PF("PRIVMSG", func(i *Client, m *Msg) {
-		i.LogF("DATA: %s (SIZE:%d)", m.Values, len(m.Values))
-
+		// Requires 2 values
 		if len(m.Values) != 2 {
 			m.Error("PRIVMSG requries exactly 2 values!")
 			return
 		}
 
-		if isChannelPrefix(string(m.Values[0][0])) {
-			if i.Server.HasChannel(m.Values[0]) {
-				m.Error("Destination channel does not exist!")
-				return
-			}
+		// If the server has the channel, send the message to it
+		if i.Server.HasChannel(m.Values[0]) {
 			ch := i.Server.GetChannel(m.Values[0])
+			// If we are not a member of the channel, we can't send messages to it
+			if !ch.IsMember(i) {
+				i.Resp(ERR_CANNOTSENDTOCHAN).Set(m.Values[0]).
+					Set(":You must be a member of the channel to send messages to it").
+					Send()
+			}
 			ch.Message(i, m.Values[1])
+			return
 		}
 
-		// TODO: client privmsg
+		// Try finding a client for the user
+		cl := i.Server.FindUserByNick(m.Values[0])
+		if cl == nil {
+			m.Error("User does not exist!")
+			i.Resp(ERR_NORECIPIENT).Set("User does not exist!").Send()
+			return
+		}
+
+		// TODO: sanatize the messsage
+		cl.Resp(CLIENT_PRIVMSG).Set(i.Nick).SetF(":%s", m.Values[1]).Send()
+
 	})
 
 	PF("PART", func(i *Client, m *Msg) {
-		if len(m.Values) > 1 {
+		if len(m.Values) < 1 {
 			m.Error("PART requires 1 or more values!")
 			return
 		}
@@ -281,4 +296,70 @@ func InitParser() {
 				Send()
 		}
 	})
+
+	PF("MODE", func(i *Client, m *Msg) {
+		if len(m.Values) < 2 {
+			m.Error("MODE requries 2 or more values!")
+			return
+		}
+
+		// Case: Is a server
+		if i.Server.HasChannel(m.Values[0]) {
+			ch := i.Server.GetChannel(m.Values[0])
+
+			if !ch.IsMember(i) {
+				i.Resp(ERR_NOTONCHANNEL).
+					Set(m.Values[0]).
+					Set(":You must be a member of the channel to set it's mode!").
+					Send()
+			}
+
+			if !ch.GetModes(i).Op || i.GlobalOp {
+				i.Resp(ERR_CHANOPRIVSNEEDED).
+					Set(m.Values[0]).
+					Set(":You need OP to modify a channels mode!").
+					Send()
+			}
+
+			prefix := string(m.Values[1][0])
+
+			// Case: MODE #blah +abcdef
+			if len(m.Values) == 2 {
+				for _, char := range m.Values[1][1:] {
+					if prefix == "+" {
+						ch.Mode.AddMode(string(char))
+					} else if prefix == "-" {
+						ch.Mode.RmvMode(string(char))
+					}
+				}
+			} else {
+				if string(m.Values[1][1]) == "k" {
+					if prefix == "+" {
+						ch.Key = m.Values[2]
+					} else {
+						ch.Key = ""
+					}
+				}
+			}
+			return
+		}
+	})
+
+	PF("OPER", func(i *Client, m *Msg) {})
+
+	PF("TOPIC", func(i *Client, m *Msg) {})
+
+	// List users on server
+	PF("NAMES", func(i *Client, m *Msg) {})
+
+	// List Channels on server
+	PF("LIST", func(i *Client, m *Msg) {})
+
+	PF("INVITE", func(i *Client, m *Msg) {})
+	PF("KICK", func(i *Client, m *Msg) {})
+	PF("VERSION", func(i *Client, m *Msg) {})
+	PF("STATS", func(i *Client, m *Msg) {})
+	PF("TIME", func(i *Client, m *Msg) {})
+	PF("INFO", func(i *Client, m *Msg) {})
+	PF("WHOIS", func(i *Client, m *Msg) {})
 }

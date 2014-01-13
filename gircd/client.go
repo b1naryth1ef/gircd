@@ -22,7 +22,7 @@ type ClientInfo struct {
 
 	/// USER
 	User     string
-	Mode     string
+	Mode     *Mode
 	Unused   string
 	RealName string
 
@@ -45,6 +45,10 @@ type Client struct {
 	Updates []*Update
 	MsgQ    chan *Msg
 
+	// Used in rate-limiting
+	Messages int
+
+	// Marks how many channels a client is in
 	Channels int
 
 	ClientInfo
@@ -64,6 +68,7 @@ func NewClient(id int, server *Server, c net.Conn) *Client {
 		Lock:     new(sync.RWMutex),
 		LastPing: time.Now(),
 		ClientInfo: ClientInfo{
+			Mode:     &Mode{""},
 			Nick:     "",
 			GlobalOp: true,
 		},
